@@ -56,7 +56,7 @@ You do **not** need prior experience with AI or Python to follow this guide. Eve
 - An internet connection (only for the first download of each model).
 - At least **8 GB RAM** for small models; **16 GB+** recommended.
 - Enough free disk space for the model (small models ≈ 1–3 GB; large models can be 10–80+ GB).
-- **Python 3.10 or newer** (installation steps below).
+- **Python 3.11 or 3.12** recommended (**3.10+** may work; see `requirements.txt` notes).
 
 Optional but helpful:
 
@@ -163,18 +163,26 @@ pip install -r requirements.txt
 
 This installs:
 
-- **PyTorch** — deep learning runtime.
+- **PyTorch** (CUDA 12.8 build by default — see Step 5) — deep learning runtime.
 - **transformers** — loads Hugging Face models.
 - **accelerate** — helps spread large models across GPUs.
 - **huggingface_hub** — downloads models from the Hub.
+- **certifi** — SSL certificates (also used to fix broken cert paths on some Windows setups).
+- **sentencepiece**, **protobuf**, **safetensors** — common tokenizer / model file support.
 
 ---
 
 ## Step 5: Install PyTorch for your hardware
 
-The default `pip install -r requirements.txt` installs a CPU build of PyTorch. For **much faster** inference on a GPU, install the build that matches your hardware.
+`requirements.txt` is configured for **NVIDIA GPUs** out of the box: it pulls PyTorch from the **CUDA 12.8** wheel index (`cu128`), which supports recent cards such as RTX 40xx and 50xx series. If you have a supported NVIDIA GPU, the Step 4 command alone is enough.
 
-Visit the official selector and copy the command for your system:
+**Not on NVIDIA CUDA?** Install a matching PyTorch build *before* or *instead of* the default CUDA wheel — see the table below. You can then install the remaining packages with:
+
+```bash
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+```
+
+Pick your PyTorch command from the official selector:
 
 **[https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)**
 
@@ -182,18 +190,14 @@ Visit the official selector and copy the command for your system:
 
 | Hardware | Typical install approach |
 |----------|--------------------------|
-| **NVIDIA GPU (CUDA)** | Use PyTorch’s CUDA wheel, e.g. `pip install torch --index-url https://download.pytorch.org/whl/cu124` |
-| **Apple Silicon (M1/M2/M3/M4)** | Default PyTorch from pip includes **MPS** (Metal) support on macOS |
+| **NVIDIA GPU (CUDA)** | Default `pip install -r requirements.txt` (cu128). For a different CUDA version, pick the matching wheel at [pytorch.org](https://pytorch.org/get-started/locally/) and reinstall `torch`. |
+| **Apple Silicon (M1/M2/M3/M4)** | Install PyTorch for macOS from [pytorch.org](https://pytorch.org/get-started/locally/) (includes **MPS** / Metal), then install the other packages listed above. |
 | **AMD GPU (Linux, ROCm)** | Use PyTorch’s ROCm build from [pytorch.org](https://pytorch.org/get-started/locally/) |
 | **Intel GPU (XPU)** | `pip install intel-extension-for-pytorch` (see [Intel docs](https://intel.github.io/intel-extension-for-pytorch/)) |
 | **AMD / Intel GPU on Windows** | `pip install torch-directml` for **DirectML** backend |
-| **CPU only** | Default `requirements.txt` is sufficient |
+| **CPU only** | Install the CPU build from [pytorch.org](https://pytorch.org/get-started/locally/), then install the other packages listed above. |
 
-After installing a GPU-specific PyTorch build, reinstall other packages if needed:
-
-```bash
-pip install -r requirements.txt
-```
+If you already ran `pip install -r requirements.txt` but need a different PyTorch build, reinstall `torch` for your platform, then run `pip install -r requirements.txt` again to refresh the rest.
 
 ### Check what your machine supports
 
@@ -227,8 +231,8 @@ After the model loads, you enter **interactive chat** mode. Type a question at t
 
 | Command | Action |
 |---------|--------|
-| `/exit` or `/quit` | End the session |
-| `/clear` | Reset conversation history (useful if replies get slow or off-topic) |
+| `/exit`, `/quit`, `exit`, or `quit` | End the session |
+| `/clear` or `clear` | Reset conversation history (useful if replies get slow or off-topic) |
 
 ### What happens
 
@@ -236,7 +240,7 @@ After the model loads, you enter **interactive chat** mode. Type a question at t
 2. It downloads model files into `./models/` (skipped on later runs if already cached).
 3. It loads weights into memory (can take 10 seconds to several minutes).
 4. It starts an interactive chat loop — each turn **streams** the answer token by token.
-5. After each reply it prints **statistics**: time, token counts, tokens per second.
+5. After each reply it prints **statistics** (prompt tokens, generation time, tokens per second).
 
 ### Single-shot mode (one prompt, then exit)
 
@@ -295,6 +299,10 @@ Model ID        : Qwen/Qwen2.5-0.5B-Instruct
 
 This confirms **where** the model runs. Faster devices (GPUs) yield higher tokens/s.
 
+### Per-turn info (interactive mode)
+
+Before each reply in chat mode, the script prints the **prompt token count** for the full conversation so far (grows as history accumulates). Use `/clear` if the count gets too large and replies slow down.
+
 ### Streaming section
 
 ```text
@@ -339,7 +347,7 @@ Only **`--model-id`** is required. Everything else has a sensible default.
 |--------|---------|-------------|
 | `--model-id` | *(required)* | Hugging Face repo id, e.g. `Qwen/Qwen2.5-0.5B-Instruct` |
 | `--interactive` / `--no-interactive` | Interactive on | Multi-turn chat (default) or single-shot with `--prompt` |
-| `--prompt` | Short hello message | Question for single-shot mode (only with `--no-interactive`) |
+| `--prompt` | Introduce-yourself greeting | Question for single-shot mode (only with `--no-interactive`) |
 | `--system-prompt` | None | Optional system role text for chat-tuned models |
 | `--models-dir` | `models` | Local folder for downloaded weights |
 | `--revision` | `main` | Git branch / tag / commit on the Hub |
@@ -353,7 +361,7 @@ Only **`--model-id`** is required. Everything else has a sensible default.
 | `--device` | `auto` | `auto`, `cuda`, `mps`, `xpu`, `dml`, or `cpu` |
 | `--dtype` | `auto` | `auto`, `float16`, `bfloat16`, or `float32` |
 | `--trust-remote-code` | off | Required for some custom model architectures |
-| `--token` | env var | Hugging Face token for gated models |
+| `--token` | env var | Hugging Face token (`HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN`) |
 | `--force-download` | off | Re-download even if files exist |
 | `--low-cpu-mem-usage` / `--no-low-cpu-mem-usage` | on | Memory-efficient loading |
 | `--list-devices` | off | Print detected backends and exit |
@@ -378,7 +386,7 @@ Browse models at [https://huggingface.co/models](https://huggingface.co/models).
 | `microsoft/Phi-3-mini-4k-instruct` | ~7 GB | Strong quality for its size |
 | `meta-llama/Llama-3.2-1B-Instruct` | ~2 GB | Gated — requires HF account + token |
 
-Prefer model cards whose names end in **`-Instruct`** or **`-Chat`** for question-answering. Base models (no suffix) are usually not tuned for dialogue.
+Prefer model cards whose names end in **`-Instruct`** or **`-Chat`** for question-answering. Base models (no suffix) are usually not tuned for dialogue. Chat-tuned models use each tokenizer’s **chat template** when available; otherwise the script falls back to a simple plain-text format.
 
 ### Size vs. quality
 
@@ -434,6 +442,8 @@ Some models require you to:
 
 **Option A — environment variable (recommended)**
 
+Either `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` works.
+
 ```bash
 # Windows Command Prompt
 set HF_TOKEN=hf_your_token_here
@@ -463,9 +473,18 @@ Use `python3` instead of `python`, or reinstall Python and enable **Add to PATH*
 
 ### `CUDA was requested but is not available`
 
-- Install the CUDA-enabled PyTorch build from [pytorch.org](https://pytorch.org/get-started/locally/).
+- Reinstall the CUDA-enabled PyTorch build from [pytorch.org](https://pytorch.org/get-started/locally/) (default `requirements.txt` targets cu128).
 - Update NVIDIA drivers.
 - Or run on CPU: `--device cpu` (slower).
+
+### SSL / certificate errors when downloading models
+
+On some Windows setups (especially **Git Bash** with **conda**), `SSL_CERT_FILE` may point to a missing file. `inference.py` clears invalid cert paths and falls back to **certifi** when installed. If downloads still fail, try:
+
+```bash
+pip install certifi
+export SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())")
+```
 
 ### Out of memory (CUDA OOM / system freeze)
 
