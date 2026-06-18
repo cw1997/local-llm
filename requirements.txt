@@ -1,8 +1,18 @@
-# Core dependencies for inference.py
-torch>=2.1.0
+# CUDA-enabled PyTorch + project dependencies (default for GPU training).
+# cu128 supports recent NVIDIA GPUs (e.g. RTX 40xx / 50xx).
+# Install: pip install -r requirements.txt
+#
+# Use Python 3.11 or 3.12 for best GPU wheel compatibility.
+# Use PyTorch index as primary so pip does not pick the CPU wheel from PyPI.
+
+--index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://pypi.org/simple
+
+torch>=2.4.0,<2.12
 transformers>=4.40.0
 accelerate>=0.30.0
 huggingface_hub>=0.23.0
+certifi>=2024.0.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0
 safetensors>=0.4.0

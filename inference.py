@@ -19,6 +19,25 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Optional
 
+
+def _ensure_ssl_certs() -> None:
+    """Fix broken SSL_CERT_FILE from conda (common on Windows Git Bash)."""
+    for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        path = os.environ.get(var)
+        if path and not os.path.isfile(path):
+            os.environ.pop(var, None)
+
+    if not os.environ.get("SSL_CERT_FILE"):
+        try:
+            import certifi
+
+            os.environ["SSL_CERT_FILE"] = certifi.where()
+        except ImportError:
+            pass
+
+
+_ensure_ssl_certs()
+
 # ---------------------------------------------------------------------------
 # Device detection
 # ---------------------------------------------------------------------------
