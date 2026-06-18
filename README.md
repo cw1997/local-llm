@@ -30,6 +30,7 @@ You do **not** need prior experience with AI or Python to follow this guide. Eve
 - [All command-line options](#all-command-line-options)
 - [Choosing a model](#choosing-a-model)
 - [Platform setup guide (NVIDIA, AMD, Intel, Apple, CPU)](#platform-setup-guide-nvidia-amd-intel-apple-cpu)
+  - [Identify your GPU (model, architecture, generation)](#identify-your-gpu-model-architecture-generation)
 - [Gated / private models](#gated--private-models)
 - [Troubleshooting](#troubleshooting)
 - [FAQ for beginners](#faq-for-beginners)
@@ -239,7 +240,7 @@ Detected inference backends on this machine:
   - cpu
 ```
 
-If you expect a GPU backend but only see `cpu`, jump to the matching section in the [Platform setup guide](#platform-setup-guide-nvidia-amd-intel-apple-cpu).
+If you expect a GPU backend but only see `cpu`, use [Identify your GPU](#identify-your-gpu-model-architecture-generation) to confirm your hardware, then jump to the matching section in the [Platform setup guide](#platform-setup-guide-nvidia-amd-intel-apple-cpu).
 
 #### B.5 — Run inference
 
@@ -378,6 +379,8 @@ If you already ran `pip install -r requirements.txt` but need a different PyTorc
 ```bash
 python inference.py --list-devices
 ```
+
+Not sure which GPU you have? See [Identify your GPU](#identify-your-gpu-model-architecture-generation) for `nvidia-smi`, `lspci`, `system_profiler`, and other commands.
 
 Example output:
 
@@ -602,6 +605,194 @@ Override anytime: `--device cuda`, `--device mps`, `--device xpu`, `--device dml
 | AMD / Intel on Windows (no ROCm) | `dml` | `torch-directml` | Windows |
 | No usable GPU / old hardware | `cpu` | `cpu` wheel | Everywhere |
 
+### Identify your GPU (model, architecture, generation)
+
+Not sure which vendor or generation you have? Run the commands below **before** picking a PyTorch wheel. Then match the model name to the tables in [NVIDIA](#nvidia-gpus-cuda-backend), [Apple](#apple-silicon-mps-backend), [AMD](#amd-gpus-rocm-on-linux--directml-on-windows), or [Intel](#intel-gpus-xpu-backend).
+
+#### Step 1 — List every graphics device (OS-level)
+
+**Windows (Command Prompt)**
+
+```bat
+wmic path win32_VideoController get Name,AdapterRAM,DriverVersion
+```
+
+**Windows (PowerShell)**
+
+```powershell
+Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion
+```
+
+**Linux**
+
+```bash
+lspci | grep -iE 'vga|3d|display'
+# More detail:
+lspci -v | grep -iE 'vga|3d|display' -A 12
+```
+
+**macOS**
+
+```bash
+# GPU / display info
+system_profiler SPDisplaysDataType
+
+# Apple Silicon chip (M1 / M2 / M3 / M4 …)
+system_profiler SPHardwareDataType | grep -E 'Chip|Model Name|Memory'
+```
+
+GUI alternative on Windows: press `Win + R`, type `dxdiag`, open the **Display** tab.
+
+#### Step 2 — Vendor-specific detail commands
+
+##### NVIDIA (model, driver, VRAM, compute capability)
+
+Requires [NVIDIA drivers](https://www.nvidia.com/drivers) installed. Works on Windows and Linux.
+
+```bash
+# Summary table
+nvidia-smi
+
+# GPU name + compute capability (architecture version) + driver + VRAM
+nvidia-smi --query-gpu=index,name,compute_cap,driver_version,memory.total --format=csv
+
+# Short list of GPU names
+nvidia-smi -L
+```
+
+Example `compute_cap` → architecture mapping:
+
+| `compute_cap` | NVIDIA architecture | Example products |
+|---------------|---------------------|------------------|
+| `12.0` | Blackwell | RTX 5090, 5080, 5070 Ti, 5060 Ti |
+| `8.9` | Ada Lovelace | RTX 4090, 4080, 4070, 4060 |
+| `8.6` / `8.0` | Ampere | RTX 3090, 3080, 3060; A100 |
+| `7.5` | Turing | RTX 2080 Ti, 2060; GTX 1660 Ti; T4 |
+| `7.0` | Volta | Tesla V100, Titan V |
+| `6.1` / `6.0` | Pascal | GTX 1080 Ti, 1070, 1060; P100 |
+| `5.2` / `5.3` | Maxwell | GTX 980, 970, 960 |
+
+After PyTorch + CUDA are installed, double-check from Python:
+
+```bash
+python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('GPU count:', torch.cuda.device_count()); [print(f'  [{i}]', torch.cuda.get_device_name(i), 'capability', torch.cuda.get_device_capability(i)) for i in range(torch.cuda.device_count())]"
+```
+
+##### AMD (model, ROCm architecture `gfx*`)
+
+**Linux — ROCm tools** (install ROCm / driver first):
+
+```bash
+# Product name + VRAM (similar to nvidia-smi)
+rocm-smi
+
+# Architecture identifier (e.g. gfx1100 = RDNA 3, gfx1200 = RDNA 4)
+rocminfo | grep -E 'Marketing Name|Name:|gfx'
+
+# Quick grep for gfx target
+rocminfo | grep gfx
+```
+
+Common `gfx` codes for consumer Radeon:
+
+| `gfx` ID | Architecture | Example products |
+|----------|--------------|------------------|
+| `gfx1200`, `gfx1201` | RDNA 4 | RX 9070 XT, 9060 XT |
+| `gfx1100`, `gfx1101`, `gfx1102` | RDNA 3 | RX 7900 XTX/XT, 7800 XT, 7700 XT |
+| `gfx1030`, `gfx1031` | RDNA 2 | RX 6900 XT, 6800 XT, 6700 XT |
+| `gfx1010` | RDNA 1 | RX 5700 XT |
+
+With ROCm PyTorch installed:
+
+```bash
+python -c "import torch; print('available:', torch.cuda.is_available()); print('name:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
+```
+
+**Windows** — ROCm tools may be unavailable; use OS listing + DirectML path:
+
+```powershell
+Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'AMD|Radeon' } | Select Name, DriverVersion
+```
+
+##### Intel (discrete Arc vs integrated)
+
+**Windows (PowerShell)**
+
+```powershell
+Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'Intel' } | Select Name, DriverVersion
+```
+
+**Linux**
+
+```bash
+lspci | grep -i vga
+# Intel GPU usage monitor (if intel-gpu-tools installed):
+sudo intel_gpu_top -L
+```
+
+Look for names containing **Arc** (discrete A/B series), **Iris Xe**, or **Core Ultra** with Arc branding.
+
+With PyTorch XPU installed:
+
+```bash
+python -c "import torch; xpu=getattr(torch,'xpu',None); print('XPU available:', xpu.is_available() if xpu else False); print('device:', xpu.get_device_name(0) if xpu and xpu.is_available() else 'N/A')"
+```
+
+##### Apple Silicon (chip generation)
+
+```bash
+# Chip name: Apple M1, M2 Pro, M3 Max, M4, etc.
+sysctl -n machdep.cpu.brand_string 2>/dev/null || system_profiler SPHardwareDataType | grep Chip
+
+# Unified memory size (GB) — important for model size limits
+system_profiler SPHardwareDataType | grep Memory
+```
+
+| Chip name pattern | Generation | Release era |
+|-------------------|------------|-------------|
+| Apple M1 / M1 Pro / Max / Ultra | M1 | 2020–2021 |
+| Apple M2 / M2 Pro / Max / Ultra | M2 | 2022 |
+| Apple M3 / M3 Pro / Max | M3 | 2023 |
+| Apple M4 / M4 Pro / Max | M4 | 2024–2025 |
+
+With PyTorch installed on macOS:
+
+```bash
+python -c "import torch; print('MPS available:', torch.backends.mps.is_available()); print('MPS built:', torch.backends.mps.is_built())"
+```
+
+#### Step 3 — Map model name → this project’s backend
+
+| If you see … | Vendor | Likely generation | Use backend | Jump to |
+|--------------|--------|-------------------|-------------|---------|
+| GeForce RTX 50xx, RTX PRO Blackwell | NVIDIA | Blackwell | `cuda` + cu128 | [NVIDIA](#nvidia-gpus-cuda-backend) |
+| GeForce RTX 40xx | NVIDIA | Ada Lovelace | `cuda` + cu128 | [NVIDIA](#nvidia-gpus-cuda-backend) |
+| GeForce RTX 30xx | NVIDIA | Ampere | `cuda` | [NVIDIA](#nvidia-gpus-cuda-backend) |
+| GeForce RTX 20xx / GTX 16xx | NVIDIA | Turing | `cuda` + cu118/cu124 | [NVIDIA](#nvidia-gpus-cuda-backend) |
+| GeForce GTX 10xx | NVIDIA | Pascal | `cuda` + cu118 | [NVIDIA](#nvidia-gpus-cuda-backend) |
+| GeForce GTX 9xx or older | NVIDIA | Maxwell / older | Often `cpu` | [CPU](#cpu-only-inference) |
+| Radeon RX 9xxx / 7xxx (Linux) | AMD | RDNA 4 / 3 | `cuda` (ROCm) | [AMD](#amd-gpus-rocm-on-linux--directml-on-windows) |
+| Radeon RX 6xxx (Linux) | AMD | RDNA 2 | ROCm or `cpu` | [AMD](#amd-gpus-rocm-on-linux--directml-on-windows) |
+| Radeon / AMD (Windows) | AMD | various | `dml` | [AMD Windows](#amd--intel-gpus-on-windows-directml) |
+| Intel Arc A770 / B580 / etc. | Intel | Alchemist / Battlemage | `xpu` or `dml` | [Intel](#intel-gpus-xpu-backend) |
+| Intel Iris Xe / UHD | Intel | integrated | `xpu` / `dml` / `cpu` | [Intel](#intel-gpus-xpu-backend) |
+| Apple M1 / M2 / M3 / M4 | Apple | Apple Silicon | `mps` | [Apple](#apple-silicon-mps-backend) |
+| No discrete GPU / virtual machine | — | — | `cpu` | [CPU](#cpu-only-inference) |
+
+#### Step 4 — What PyTorch / inference.py can actually use
+
+OS detection tells you **what hardware exists**; PyTorch tells you **what is usable right now**:
+
+```bash
+# Backends this project can select
+python inference.py --list-devices
+
+# Full environment report (CUDA / ROCm / MPS / CPU versions)
+python -m torch.utils.collect_env
+```
+
+If hardware is present but the backend is missing (e.g. GPU listed in `nvidia-smi` but `--list-devices` shows only `cpu`), your PyTorch wheel does not match the GPU — reinstall per the vendor section above.
+
 ### VRAM / RAM vs model size (rule of thumb)
 
 These are **approximate** minimums for **FP16** weights at inference. Real usage depends on context length, tokenizer, and overhead.
@@ -621,6 +812,8 @@ If you run out of memory: use a smaller model, lower `--max-new-tokens`, set `--
 
 **Backend in this project:** `cuda`  
 **What you need:** recent **NVIDIA driver** only — PyTorch CUDA wheels bundle their own CUDA runtime. You do **not** need to install the full CUDA Toolkit for basic inference.
+
+> **Don't know your exact card?** Run `nvidia-smi` and see [Identify your GPU](#identify-your-gpu-model-architecture-generation).
 
 PyTorch wheels are labeled by CUDA *flavor*: `cu118`, `cu124`, `cu126`, `cu128`, etc. Pick a wheel **equal to or newer than** what your GPU generation needs. When in doubt, use the latest stable `cu128` (this repo’s default).
 
@@ -697,6 +890,8 @@ python inference.py --model-id Qwen/Qwen2.5-7B-Instruct --device cuda
 **Backend:** `mps`  
 **Supported chips:** Apple **M1**, **M1 Pro**, **M1 Max**, **M1 Ultra**, **M2** family, **M3** family, **M4** family (MacBook Air/Pro, Mac mini, Mac Studio, Mac Pro with Apple Silicon).
 
+> **Check your chip:** `system_profiler SPHardwareDataType | grep Chip` — see [Identify your GPU](#identify-your-gpu-model-architecture-generation).
+
 **Not supported:** Intel-based Macs (pre-2020) — no MPS; use [CPU-only](#cpu-only-inference).
 
 Apple Silicon uses **unified memory** (RAM = VRAM). A 16 GB Mac can run ~7B models in FP16 with care; 8 GB Macs should stick to ≤3B models.
@@ -748,6 +943,8 @@ python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device mps --dtype f
 ### AMD GPUs (ROCm on Linux + DirectML on Windows)
 
 AMD support splits by operating system.
+
+> **Check your card:** `lspci | grep -i vga` (Linux) or Device Manager / `wmic` (Windows) — see [Identify your GPU](#identify-your-gpu-model-architecture-generation).
 
 #### Linux — ROCm (uses `cuda` backend in PyTorch)
 
@@ -822,6 +1019,8 @@ DirectML is slower than native CUDA/ROCm but much faster than CPU for many model
 **Backend:** `xpu`  
 Modern Intel GPU support is built into **official PyTorch XPU wheels** (the separate Intel Extension for PyTorch package is deprecated as of 2.8 — use native `xpu`).
 
+> **Check your GPU:** `Get-CimInstance Win32_VideoController` (Windows) or `lspci | grep -i vga` (Linux) — see [Identify your GPU](#identify-your-gpu-model-architecture-generation).
+
 #### Supported Intel hardware (validated by PyTorch)
 
 | Product line | Codename | Examples | OS |
@@ -873,6 +1072,8 @@ Use CPU when:
 - You are on **Intel Mac**, **old laptop**, or **virtual machine** without GPU passthrough.
 - GPU setup fails and you need a reliable fallback.
 
+> **Confirm you have no usable GPU:** run the OS commands in [Identify your GPU](#identify-your-gpu-model-architecture-generation); if only integrated graphics or nothing appears, CPU is the safe path.
+
 **Backend:** `cpu`  
 **Expectation:** Slow but universal. A 0.5B–1B instruct model on a modern 8-core CPU is fine for testing; 7B+ is often impractical without patience.
 
@@ -912,6 +1113,19 @@ python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device cpu
 | **Apple Intel Mac** | Core i5/i7/i9 pre-2020 | No MPS; CPU-only |
 | **ARM (non-Apple)** | Ampere Altra, Raspberry Pi 5 | Possible but slow; stick to ≤1B models |
 
+Query CPU model from the terminal:
+
+```bash
+# Windows
+wmic cpu get Name,NumberOfCores,NumberOfLogicalProcessors
+
+# Linux
+lscpu
+
+# macOS
+sysctl -n machdep.cpu.brand_string
+```
+
 ---
 
 ### Platform quick-start matrix (copy-paste)
@@ -935,16 +1149,29 @@ One-page reference after `conda activate local-llm` and `cd local-llm`:
 ### Verify your setup (all platforms)
 
 ```bash
+# 0) OS-level GPU identity (see full command list in "Identify your GPU" above)
+# NVIDIA:
+nvidia-smi --query-gpu=name,compute_cap,driver_version,memory.total --format=csv
+# AMD Linux:
+rocm-smi && rocminfo | grep gfx
+# Apple Silicon:
+system_profiler SPHardwareDataType | grep -E 'Chip|Memory'
+# Generic Linux / fallback:
+lspci | grep -iE 'vga|3d|display'
+
 # 1) Backends exposed to inference.py
 python inference.py --list-devices
 
 # 2) Low-level PyTorch device check (examples)
 python -c "import torch; print('torch', torch.__version__)"
-python -c "import torch; print('cuda', torch.cuda.is_available())"          # NVIDIA / AMD ROCm
+python -c "import torch; print('cuda', torch.cuda.is_available()); [print(torch.cuda.get_device_name(i), torch.cuda.get_device_capability(i)) for i in range(torch.cuda.device_count())]"  # NVIDIA / AMD ROCm
 python -c "import torch; print('mps', torch.backends.mps.is_available())"  # Apple
-python -c "import torch; print('xpu', hasattr(torch,'xpu') and torch.xpu.is_available())"  # Intel
+python -c "import torch; xpu=getattr(torch,'xpu',None); print('xpu', xpu.is_available() if xpu else False)"  # Intel
 
-# 3) End-to-end smoke test
+# 3) Full diagnostic bundle
+python -m torch.utils.collect_env
+
+# 4) End-to-end smoke test
 python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --no-interactive --prompt "Say hello in one sentence."
 ```
 
@@ -1118,6 +1345,9 @@ Rough measure of model size. 0.5B ≈ 500 million learned weights. Bigger often 
 
 **Why is the first run slow?**  
 Downloading and loading multi-gigabyte weights takes time. Later runs reuse the cache.
+
+**How do I find my GPU model and generation?**  
+See [Identify your GPU](#identify-your-gpu-model-architecture-generation): `nvidia-smi` (NVIDIA), `rocm-smi` / `rocminfo` (AMD Linux), `system_profiler` (Apple), `lspci` or `wmic` (generic).
 
 **Can I use Miniconda instead of venv?**  
 Yes — [Option B in Step 3](#option-b--miniconda-recommended-for-gpu-workflows) is recommended for GPU setups. Models still download to `models/` in the project folder regardless of environment type.
