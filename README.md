@@ -20,14 +20,16 @@ You do **not** need prior experience with AI or Python to follow this guide. Eve
 - [What you need before starting](#what-you-need-before-starting)
 - [Step 1: Install Python](#step-1-install-python)
 - [Step 2: Download this project](#step-2-download-this-project)
-- [Step 3: Create a virtual environment (recommended)](#step-3-create-a-virtual-environment-recommended)
+- [Step 3: Create an isolated Python environment](#step-3-create-an-isolated-python-environment)
+  - [Option A — `venv` (lightweight)](#option-a--venv-lightweight)
+  - [Option B — Miniconda (recommended for GPU workflows)](#option-b--miniconda-recommended-for-gpu-workflows)
 - [Step 4: Install dependencies](#step-4-install-dependencies)
 - [Step 5: Install PyTorch for your hardware](#step-5-install-pytorch-for-your-hardware)
 - [Step 6: Run your first inference](#step-6-run-your-first-inference)
 - [Understanding the output](#understanding-the-output)
 - [All command-line options](#all-command-line-options)
 - [Choosing a model](#choosing-a-model)
-- [Hardware support](#hardware-support)
+- [Platform setup guide (NVIDIA, AMD, Intel, Apple, CPU)](#platform-setup-guide-nvidia-amd-intel-apple-cpu)
 - [Gated / private models](#gated--private-models)
 - [Troubleshooting](#troubleshooting)
 - [FAQ for beginners](#faq-for-beginners)
@@ -56,7 +58,7 @@ You do **not** need prior experience with AI or Python to follow this guide. Eve
 - An internet connection (only for the first download of each model).
 - At least **8 GB RAM** for small models; **16 GB+** recommended.
 - Enough free disk space for the model (small models ≈ 1–3 GB; large models can be 10–80+ GB).
-- **Python 3.11 or 3.12** recommended (**3.10+** may work; see `requirements.txt` notes).
+- **Python 3.11 or 3.12** recommended (**3.10+** may work; see `requirements.txt` notes), **or** Miniconda (see [Step 3 Option B](#option-b--miniconda-recommended-for-gpu-workflows)).
 
 Optional but helpful:
 
@@ -66,6 +68,13 @@ Optional but helpful:
 ---
 
 ## Step 1: Install Python
+
+You need **Python 3.11 or 3.12** for the best PyTorch wheel compatibility. Two common paths:
+
+| Path | When to use |
+|------|-------------|
+| **A — System Python** (below) | Quick setup with `venv` |
+| **B — Miniconda** | Skip installing Python separately — [go to Step 3 Option B](#option-b--miniconda-recommended-for-gpu-workflows) after downloading this repo |
 
 ### Windows
 
@@ -124,18 +133,27 @@ All commands below assume your terminal’s **current directory** is the project
 
 ---
 
-## Step 3: Create a virtual environment (recommended)
+## Step 3: Create an isolated Python environment
 
-A *virtual environment* keeps this project’s Python packages separate from the rest of your system. This avoids version conflicts.
+You need an **isolated environment** so this project’s packages do not conflict with other Python projects on your system. Pick one approach below.
 
-### Windows
+| Approach | Best for | Notes |
+|----------|----------|-------|
+| **Option A — `venv`** | Quick try-out, already have Python 3.11/3.12 | Built into Python; no extra installer |
+| **Option B — Miniconda** | GPU workflows, multiple Python versions, data/ML stacks | **Recommended** if you plan to experiment with CUDA / ROCm / XPU wheels |
+
+---
+
+### Option A — `venv` (lightweight)
+
+#### Windows
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 ```
 
-### macOS / Linux
+#### macOS / Linux
 
 ```bash
 python3 -m venv .venv
@@ -152,9 +170,163 @@ deactivate
 
 ---
 
+### Option B — Miniconda (recommended for GPU workflows)
+
+[Miniconda](https://docs.anaconda.com/miniconda/) is a minimal installer for **Conda** — a package and environment manager widely used for machine-learning stacks. It lets you create a dedicated environment with a specific Python version, install PyTorch builds matched to your GPU, and keep everything separate from system Python.
+
+#### B.1 — Install Miniconda
+
+Download the installer for your OS from the official page:
+
+**[https://docs.anaconda.com/miniconda/](https://docs.anaconda.com/miniconda/)**
+
+| OS | Installer tips |
+|----|----------------|
+| **Windows** | Run the `.exe` installer. Optionally check “Add Miniconda3 to PATH” (or use **Anaconda Prompt** / **Miniconda Prompt** from the Start menu). |
+| **macOS (Apple Silicon)** | Use the **arm64** (M1/M2/M3/M4) installer. |
+| **macOS (Intel Mac)** | Use the **x86_64** installer — inference will be **CPU-only** (no MPS). |
+| **Linux** | Use the latest Linux x86_64 installer; on ARM64 Linux, use the matching arm64 build if available. |
+
+Verify after installation (open a **new** terminal):
+
+```bash
+conda --version
+```
+
+You should see something like `conda 25.x.x`.
+
+#### B.2 — Create a project environment
+
+From the project root (`local-llm/` folder that contains `inference.py`):
+
+```bash
+conda create -n local-llm python=3.12 -y
+conda activate local-llm
+```
+
+Use **Python 3.11** instead if a specific PyTorch wheel you need only ships for 3.11:
+
+```bash
+conda create -n local-llm python=3.11 -y
+conda activate local-llm
+```
+
+Your prompt should show `(local-llm)`.
+
+#### B.3 — Install dependencies inside the environment
+
+Still in the activated `local-llm` environment:
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+- On **NVIDIA CUDA** machines, `requirements.txt` installs **PyTorch cu128** by default.
+- On **other platforms**, see [Step 5](#step-5-install-pytorch-for-your-hardware) and the [Platform setup guide](#platform-setup-guide-nvidia-amd-intel-apple-cpu) — you may need to install a different PyTorch build *before* the remaining packages.
+
+#### B.4 — Verify hardware detection
+
+```bash
+python inference.py --list-devices
+```
+
+Example on an NVIDIA machine:
+
+```text
+Detected inference backends on this machine:
+  - cuda
+  - cpu
+```
+
+If you expect a GPU backend but only see `cpu`, jump to the matching section in the [Platform setup guide](#platform-setup-guide-nvidia-amd-intel-apple-cpu).
+
+#### B.5 — Run inference
+
+Interactive chat (default):
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct
+```
+
+Single-shot test:
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --no-interactive --prompt "Hello!"
+```
+
+Force a specific backend while debugging, e.g.:
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device cuda --no-interactive --prompt "GPU test"
+```
+
+#### B.6 — Daily workflow (Conda cheat sheet)
+
+```bash
+# Enter project folder
+cd path/to/local-llm
+
+# Activate environment (do this every new terminal session)
+conda activate local-llm
+
+# Run inference …
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct
+
+# Leave environment
+conda deactivate
+```
+
+Remove the environment entirely (does **not** delete downloaded models in `models/`):
+
+```bash
+conda deactivate
+conda env remove -n local-llm -y
+```
+
+#### B.7 — Conda + platform-specific PyTorch (common pattern)
+
+When the default `requirements.txt` CUDA wheel is **not** right for your hardware, use this pattern inside `conda activate local-llm`:
+
+```bash
+# 1) Install PyTorch for YOUR platform (examples — see platform guide for details)
+# NVIDIA Blackwell / RTX 50xx:
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+
+# Apple Silicon (MPS):
+pip install torch torchvision
+
+# Intel GPU (XPU):
+pip install torch --index-url https://download.pytorch.org/whl/xpu
+
+# CPU only:
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# 2) Install the rest of this project’s dependencies
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+
+# 3) Verify and run
+python inference.py --list-devices
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct
+```
+
+#### B.8 — Conda on Windows: SSL certificate gotcha
+
+Conda sometimes sets `SSL_CERT_FILE` to a path that does not exist, which breaks Hugging Face downloads in **Git Bash**. `inference.py` auto-clears invalid cert paths and falls back to **certifi**, but if downloads still fail:
+
+```bash
+conda activate local-llm
+pip install certifi
+export SSL_CERT_FILE=$(python -c "import certifi; print(certifi.where())")
+```
+
+Or run commands from **Anaconda Prompt** / **PowerShell** instead of Git Bash.
+
+---
+
 ## Step 4: Install dependencies
 
-With the virtual environment activated:
+With your environment activated (`conda activate local-llm` **or** `source .venv/bin/activate` / `.venv\Scripts\activate`):
 
 ```bash
 pip install --upgrade pip
@@ -174,15 +346,17 @@ This installs:
 
 ## Step 5: Install PyTorch for your hardware
 
-`requirements.txt` is configured for **NVIDIA GPUs** out of the box: it pulls PyTorch from the **CUDA 12.8** wheel index (`cu128`), which supports recent cards such as RTX 40xx and 50xx series. If you have a supported NVIDIA GPU, the Step 4 command alone is enough.
+`requirements.txt` is configured for **NVIDIA GPUs** out of the box: it pulls PyTorch from the **CUDA 12.8** wheel index (`cu128`), which supports recent cards such as RTX 40xx and 50xx (Blackwell) series. If you have a supported NVIDIA GPU, the Step 4 command alone is usually enough.
 
-**Not on NVIDIA CUDA?** Install a matching PyTorch build *before* or *instead of* the default CUDA wheel — see the table below. You can then install the remaining packages with:
+**Not on NVIDIA CUDA?** Do **not** blindly run `pip install -r requirements.txt` first — install the PyTorch build that matches your hardware, then install the remaining packages. The detailed per-vendor, per-generation instructions are in the **[Platform setup guide](#platform-setup-guide-nvidia-amd-intel-apple-cpu)** below.
+
+Quick fallback for any non-default platform after installing the correct `torch`:
 
 ```bash
 pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
 ```
 
-Pick your PyTorch command from the official selector:
+Official PyTorch install selector (copy the command for your OS / hardware):
 
 **[https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)**
 
@@ -190,14 +364,14 @@ Pick your PyTorch command from the official selector:
 
 | Hardware | Typical install approach |
 |----------|--------------------------|
-| **NVIDIA GPU (CUDA)** | Default `pip install -r requirements.txt` (cu128). For a different CUDA version, pick the matching wheel at [pytorch.org](https://pytorch.org/get-started/locally/) and reinstall `torch`. |
-| **Apple Silicon (M1/M2/M3/M4)** | Install PyTorch for macOS from [pytorch.org](https://pytorch.org/get-started/locally/) (includes **MPS** / Metal), then install the other packages listed above. |
-| **AMD GPU (Linux, ROCm)** | Use PyTorch’s ROCm build from [pytorch.org](https://pytorch.org/get-started/locally/) |
-| **Intel GPU (XPU)** | `pip install intel-extension-for-pytorch` (see [Intel docs](https://intel.github.io/intel-extension-for-pytorch/)) |
-| **AMD / Intel GPU on Windows** | `pip install torch-directml` for **DirectML** backend |
-| **CPU only** | Install the CPU build from [pytorch.org](https://pytorch.org/get-started/locally/), then install the other packages listed above. |
+| **NVIDIA GPU (CUDA)** | Default `pip install -r requirements.txt` (cu128). See [NVIDIA](#nvidia-gpus-cuda-backend) for older generations. |
+| **Apple Silicon (M1–M4)** | Native macOS PyTorch with **MPS**. See [Apple](#apple-silicon-mps-backend). |
+| **AMD GPU (Linux ROCm)** | ROCm PyTorch wheels. See [AMD](#amd-gpus-rocm-on-linux--directml-on-windows). |
+| **Intel GPU (XPU)** | PyTorch `xpu` wheels. See [Intel](#intel-gpus-xpu-backend). |
+| **AMD / Intel GPU on Windows** | `torch-directml` + `--device dml`. See [AMD Windows](#amd--intel-gpus-on-windows-directml). |
+| **CPU only** | PyTorch CPU wheels. See [CPU-only](#cpu-only-inference). |
 
-If you already ran `pip install -r requirements.txt` but need a different PyTorch build, reinstall `torch` for your platform, then run `pip install -r requirements.txt` again to refresh the rest.
+If you already ran `pip install -r requirements.txt` but need a different PyTorch build, reinstall `torch` for your platform, then refresh the rest with the command above or `pip install -r requirements.txt` again.
 
 ### Check what your machine supports
 
@@ -397,30 +571,382 @@ If generation is slow or you run out of memory, pick a smaller model or use `--d
 
 ---
 
-## Hardware support
+## Platform setup guide (NVIDIA, AMD, Intel, Apple, CPU)
 
-`inference.py` tries to use the **best available accelerator** when `--device auto` (the default).
+This section is the **detailed reference** for every major inference backend that `inference.py` supports. All examples assume you have already:
 
-| Vendor | Backend flag | When it is used |
-|--------|--------------|-----------------|
-| **NVIDIA** | `cuda` | CUDA-capable GPU + CUDA PyTorch |
-| **AMD (Linux ROCm)** | `cuda` | ROCm build of PyTorch exposes AMD GPUs via the CUDA API |
-| **Apple M-series** | `mps` | macOS with Apple Silicon |
-| **Intel discrete / integrated** | `xpu` | With Intel Extension for PyTorch |
-| **AMD / Intel on Windows** | `dml` | With `torch-directml` installed |
-| **CPU** | `cpu` | Fallback when no GPU backend is available |
+1. Cloned this repo and `cd local-llm`
+2. Created and activated an environment (`conda activate local-llm` or `venv`)
+3. Installed the correct **PyTorch** build for your hardware (then the other dependencies from Step 4)
 
-### Default behavior (`--device auto`)
+Use `python inference.py --list-devices` to see what your current PyTorch install exposes.
 
-Priority order:
+### How `inference.py` picks a device (`--device auto`)
 
-1. **CUDA** (NVIDIA or AMD ROCm) — including multi-GPU via `device_map=auto` when several CUDA devices exist.
-2. **Apple MPS** (Metal on M1/M2/M3/M4 Macs).
-3. **Intel XPU**.
-4. **DirectML** (Windows GPUs).
-5. **CPU** if nothing else works.
+Priority order when you do not pass `--device`:
 
-You can force a backend, e.g. `--device cpu` for debugging.
+1. **CUDA** — NVIDIA GPUs, and AMD GPUs on Linux with a ROCm PyTorch build (ROCm exposes GPUs through PyTorch’s CUDA API).
+2. **MPS** — Apple Silicon Macs (Metal Performance Shaders).
+3. **XPU** — Intel discrete / integrated Arc graphics with PyTorch XPU wheels.
+4. **DirectML (`dml`)** — Windows GPUs via `torch-directml` (AMD / Intel / some NVIDIA on Windows).
+5. **CPU** — always available as fallback.
+
+Override anytime: `--device cuda`, `--device mps`, `--device xpu`, `--device dml`, or `--device cpu`.
+
+| Vendor / scenario | `--device` flag | PyTorch package you need | OS notes |
+|-------------------|-----------------|--------------------------|----------|
+| NVIDIA discrete GPU | `cuda` (auto) | `cu118` / `cu124` / `cu128` wheel | Windows, Linux |
+| AMD discrete GPU (ROCm) | `cuda` (auto) | ROCm PyTorch wheel | Linux primary; Windows ROCm improving |
+| Apple M1–M4 | `mps` (auto) | macOS arm64 PyTorch | macOS only |
+| Intel Arc / Core Ultra iGPU | `xpu` (auto) | `xpu` wheel from pytorch.org | Windows 11, Linux |
+| AMD / Intel on Windows (no ROCm) | `dml` | `torch-directml` | Windows |
+| No usable GPU / old hardware | `cpu` | `cpu` wheel | Everywhere |
+
+### VRAM / RAM vs model size (rule of thumb)
+
+These are **approximate** minimums for **FP16** weights at inference. Real usage depends on context length, tokenizer, and overhead.
+
+| Model size | GPU VRAM (comfortable) | System RAM if CPU-only |
+|------------|------------------------|-------------------------|
+| 0.5B–1B | 2–4 GB | 4–8 GB |
+| 3B | 6–8 GB | 8–12 GB |
+| 7B | 12–16 GB | 16–24 GB |
+| 13B+ | 24 GB+ | 32 GB+ |
+
+If you run out of memory: use a smaller model, lower `--max-new-tokens`, set `--dtype float16`, or fall back to `--device cpu` with a tiny model.
+
+---
+
+### NVIDIA GPUs (CUDA backend)
+
+**Backend in this project:** `cuda`  
+**What you need:** recent **NVIDIA driver** only — PyTorch CUDA wheels bundle their own CUDA runtime. You do **not** need to install the full CUDA Toolkit for basic inference.
+
+PyTorch wheels are labeled by CUDA *flavor*: `cu118`, `cu124`, `cu126`, `cu128`, etc. Pick a wheel **equal to or newer than** what your GPU generation needs. When in doubt, use the latest stable `cu128` (this repo’s default).
+
+#### NVIDIA generations at a glance
+
+| Generation | Example products | Architecture (compute capability) | Recommended PyTorch CUDA wheel | Notes |
+|------------|------------------|-------------------------------------|-------------------------------|-------|
+| **Blackwell** | RTX 5090, 5080, 5070 Ti, 5060 Ti; RTX PRO Blackwell | `sm_120` | **cu128**, PyTorch **2.7+** | RTX 50-series **requires** cu128; older cu124 wheels lack `sm_120` kernels |
+| **Ada Lovelace** | RTX 4090, 4080, 4070 Ti, 4060; RTX 6000 Ada | `sm_89` | cu124 or **cu128** | Default `requirements.txt` (cu128) works well |
+| **Ampere** | RTX 3090, 3080, 3070, 3060; A100, A40, RTX A6000 | `sm_86`, `sm_80` | cu118, cu124, or cu128 | Workhorse generation; all modern wheels supported |
+| **Turing** | RTX 2080 Ti, 2070, 2060; GTX 1660 Ti; T4 | `sm_75` | cu118+ | Still well supported |
+| **Volta** | Tesla V100, Titan V | `sm_70` | cu118+ | Datacenter / legacy enthusiast |
+| **Pascal** | GTX 1080 Ti, 1070, 1060; P100 | `sm_61`, `sm_60` | cu118 | Supported but aging; prefer smaller models |
+| **Maxwell** | GTX 980, 970, 960, 750 Ti | `sm_52`, `sm_53` | Often **CPU fallback** | Very old; PyTorch support is limited — use `--device cpu` + tiny models |
+
+#### Miniconda + NVIDIA: full example (RTX 40xx / 50xx)
+
+```bash
+conda create -n local-llm python=3.12 -y
+conda activate local-llm
+cd local-llm
+
+# Default path — cu128 (good for RTX 40xx and 50xx)
+pip install --upgrade pip
+pip install -r requirements.txt
+
+python inference.py --list-devices
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct
+```
+
+#### Older NVIDIA (GTX 10xx / RTX 20xx) — cu118 example
+
+If cu128 causes issues on very old drivers, try CUDA 11.8 wheels:
+
+```bash
+conda activate local-llm
+pip uninstall -y torch
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device cuda
+```
+
+#### Blackwell (RTX 50xx) checklist
+
+1. Update to the **latest NVIDIA driver** for your RTX 50-series card.
+2. Install **PyTorch 2.7+** with **cu128** (this repo’s `requirements.txt` targets this).
+3. Verify:
+
+```bash
+python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+4. If you see `sm_120 is not compatible`, you likely have an older `cu124` or CPU-only torch — reinstall cu128.
+
+#### Multi-GPU NVIDIA
+
+When `--device auto` detects **multiple** CUDA devices, `inference.py` loads the model with `device_map="auto"` (via `accelerate`) to spread layers across GPUs. Useful for 7B+ models that do not fit on one card.
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-7B-Instruct --device cuda
+```
+
+#### NVIDIA laptop / low-VRAM tips
+
+- Start with `Qwen/Qwen2.5-0.5B-Instruct` or `meta-llama/Llama-3.2-1B-Instruct`.
+- Use `--dtype float16` (default on GPU with `--dtype auto`).
+- Close browser GPU tabs and other CUDA apps before loading 7B models.
+
+---
+
+### Apple Silicon (MPS backend)
+
+**Backend:** `mps`  
+**Supported chips:** Apple **M1**, **M1 Pro**, **M1 Max**, **M1 Ultra**, **M2** family, **M3** family, **M4** family (MacBook Air/Pro, Mac mini, Mac Studio, Mac Pro with Apple Silicon).
+
+**Not supported:** Intel-based Macs (pre-2020) — no MPS; use [CPU-only](#cpu-only-inference).
+
+Apple Silicon uses **unified memory** (RAM = VRAM). A 16 GB Mac can run ~7B models in FP16 with care; 8 GB Macs should stick to ≤3B models.
+
+#### Apple chip generations
+
+| Chip | Year | GPU cores (approx.) | LLM inference notes |
+|------|------|---------------------|---------------------|
+| **M1** | 2020 | 7–8 (base) | Good for ≤3B; 7B possible on 16 GB+ with patience |
+| **M1 Pro / Max / Ultra** | 2021 | 14–64 | Strong for 3B–7B; Ultra handles 13B with tuning |
+| **M2** family | 2022 | 8–76 | Similar to M1 generation, modestly faster |
+| **M3** family | 2023 | 8–40 | Improved efficiency; good 7B experience on 18 GB+ |
+| **M4** family | 2024–25 | 8–40 | Fastest Apple Silicon; 7B–8B comfortable on 16 GB+ |
+
+#### Miniconda + Apple Silicon: full example
+
+```bash
+# Use arm64 Miniconda installer from anaconda.com
+conda create -n local-llm python=3.12 -y
+conda activate local-llm
+cd local-llm
+
+pip install --upgrade pip
+pip install torch torchvision
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+
+python inference.py --list-devices
+# Expected: mps, cpu
+
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device mps
+```
+
+#### macOS requirements
+
+- **macOS 12.3+** for MPS (Metal).
+- Keep PyTorch updated — MPS bugs are fixed in newer releases.
+- If MPS errors occur, retry with `--device cpu` or upgrade macOS / PyTorch.
+
+#### Apple Silicon dtype notes
+
+`--dtype auto` selects **float16** on MPS. Some models behave better with `--dtype float32` on MPS if you see NaNs (rare):
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device mps --dtype float32
+```
+
+---
+
+### AMD GPUs (ROCm on Linux + DirectML on Windows)
+
+AMD support splits by operating system.
+
+#### Linux — ROCm (uses `cuda` backend in PyTorch)
+
+ROCm builds expose AMD GPUs through `torch.cuda`. In `inference.py`, `--device auto` therefore picks **`cuda`** when ROCm PyTorch is installed — this is expected.
+
+##### AMD GPU generations (Linux ROCm)
+
+| Architecture | Example products | ROCm support (2025–26) | Notes |
+|--------------|------------------|------------------------|-------|
+| **RDNA 4** | RX 9070 XT, 9060 XT; Radeon AI PRO R9700 | ROCm **7.2+**, PyTorch **2.9+** | Newest consumer cards; follow [AMD ROCm Radeon docs](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/) |
+| **RDNA 3** | RX 7900 XTX/XT, 7800 XT, 7700 XT; PRO W7900/W7800 | ROCm 6.x / 7.x (see matrix) | Well supported on recent ROCm; use AMD-tested wheels from [repo.radeon.com](https://repo.radeon.com) when possible |
+| **RDNA 2** | RX 6900 XT, 6800 XT, 6700 XT | Limited / legacy | May need older ROCm or CPU fallback — check AMD compatibility matrix |
+| **RDNA 1** | RX 5700 XT | Mostly **unsupported** | Use CPU or consider different hardware |
+| **CDNA / Instinct** | MI100, MI250, MI300 | Full ROCm datacenter support | Excellent for large models in datacenter |
+
+##### Miniconda + AMD ROCm (Linux) — outline
+
+AMD recommends wheels from **repo.radeon.com** (version-matched to ROCm). Exact filenames change with releases — always check:
+
+- [Install PyTorch for Radeon](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/native_linux/install-pytorch.html)
+- [Compatibility matrix](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityrad/native_linux/native_linux_compatibility.html)
+
+Typical workflow:
+
+```bash
+conda create -n local-llm python=3.12 -y
+conda activate local-llm
+cd local-llm
+
+# Install ROCm PyTorch per AMD docs (example — URLs change with releases)
+# pip install torch-2.x.x+rocm...whl torchvision-...whl ...
+
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python inference.py --list-devices
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device cuda
+```
+
+##### AMD Ryzen AI APUs (Linux / Windows)
+
+Ryzen AI 300 / 400 series APUs with RDNA graphics are gaining ROCm support on Linux and Windows. Treat them like other AMD GPUs — install the ROCm PyTorch build AMD documents for your APU SKU.
+
+#### AMD / Intel GPUs on Windows — DirectML
+
+When ROCm is not available (most consumer AMD + Intel GPUs on Windows), use **DirectML**:
+
+```bash
+conda activate local-llm
+pip install torch-directml
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+
+python inference.py --list-devices
+# Expected: dml, cpu
+
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device dml --no-interactive --prompt "DirectML test"
+```
+
+| GPU type on Windows | DirectML expectation |
+|---------------------|----------------------|
+| AMD RX 6000 / 7000 / 9000 | Usually works via `--device dml` |
+| Intel Arc A770 / A750 / B-series | Usually works via `--device dml` |
+| Intel integrated (Iris Xe) | May work; performance varies |
+| NVIDIA on Windows | Prefer native **CUDA** (`--device cuda`) over DirectML |
+
+DirectML is slower than native CUDA/ROCm but much faster than CPU for many models.
+
+---
+
+### Intel GPUs (XPU backend)
+
+**Backend:** `xpu`  
+Modern Intel GPU support is built into **official PyTorch XPU wheels** (the separate Intel Extension for PyTorch package is deprecated as of 2.8 — use native `xpu`).
+
+#### Supported Intel hardware (validated by PyTorch)
+
+| Product line | Codename | Examples | OS |
+|--------------|----------|----------|-----|
+| **Intel Arc discrete** | Alchemist | Arc A770, A750, A580, A380 | Windows 11, Linux |
+| **Intel Arc discrete** | Battlemage | Arc B580, B570 | Windows 11, Linux |
+| **Core Ultra integrated** | Meteor Lake-H | Core Ultra 7 155H (Arc iGPU) | Windows 11, Linux |
+| **Core Ultra Series 2** | Arrow Lake-H, Lunar Lake | Core Ultra 200V mobile | Windows 11, Linux |
+| **Core Ultra Series 3** | Panther Lake | Upcoming mobile | Windows 11, Ubuntu 25.10+ |
+| **Data center** | Ponte Vecchio | Intel Data Center GPU Max 1550 | Linux |
+
+Older **Intel UHD / Iris Xe** without Arc branding: try XPU wheels on Windows 11 / recent Linux; if `xpu` is not listed, use [DirectML](#amd--intel-gpus-on-windows-directml) on Windows or [CPU](#cpu-only-inference).
+
+#### Driver prerequisite
+
+Install Intel GPU drivers **before** PyTorch. See Intel’s guide:
+
+**[PyTorch prerequisites for Intel GPU](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html)**
+
+#### Miniconda + Intel XPU: full example
+
+```bash
+conda create -n local-llm python=3.12 -y
+conda activate local-llm
+cd local-llm
+
+pip install --upgrade pip
+pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+
+python inference.py --list-devices
+# Expected: xpu, cpu
+
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device xpu
+```
+
+#### Intel XPU dtype notes
+
+- `--dtype auto` → float16 on XPU (same as CUDA/MPS).
+- FP64 is limited on some Arc cards; stick to float16 / bfloat16 / float32.
+
+---
+
+### CPU-only inference
+
+Use CPU when:
+
+- You have **no discrete GPU**, or your GPU is **too old** for PyTorch kernels (e.g. Maxwell GTX 900 series).
+- You are on **Intel Mac**, **old laptop**, or **virtual machine** without GPU passthrough.
+- GPU setup fails and you need a reliable fallback.
+
+**Backend:** `cpu`  
+**Expectation:** Slow but universal. A 0.5B–1B instruct model on a modern 8-core CPU is fine for testing; 7B+ is often impractical without patience.
+
+#### Miniconda + CPU: full example
+
+```bash
+conda create -n local-llm python=3.12 -y
+conda activate local-llm
+cd local-llm
+
+pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors
+
+python inference.py --list-devices
+# Expected: cpu
+
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device cpu
+```
+
+#### CPU performance tips
+
+| Tip | Command / action |
+|-----|------------------|
+| Use the smallest model | `--model-id Qwen/Qwen2.5-0.5B-Instruct` |
+| Shorter replies | `--max-new-tokens 128` |
+| Deterministic / slightly faster | `--no-do-sample` |
+| Lower memory during load | `--low-cpu-mem-usage` (default on) |
+| More RAM headroom | `--dtype float32` uses *more* RAM; try `--dtype float16` only if your CPU path supports it — on CPU, `auto` picks float32 |
+
+#### CPU by vendor (all generations)
+
+| CPU vendor | Generations | Notes |
+|------------|-------------|-------|
+| **Intel** | Core 6th gen–14th gen; Core Ultra 100/200 | Works everywhere; more cores = faster token/s |
+| **AMD** | Ryzen 2000–9000 series, Threadripper, EPYC | Excellent CPU inference scaling with core count |
+| **Apple Intel Mac** | Core i5/i7/i9 pre-2020 | No MPS; CPU-only |
+| **ARM (non-Apple)** | Ampere Altra, Raspberry Pi 5 | Possible but slow; stick to ≤1B models |
+
+---
+
+### Platform quick-start matrix (copy-paste)
+
+One-page reference after `conda activate local-llm` and `cd local-llm`:
+
+| Your hardware | Install PyTorch | Run inference |
+|---------------|-----------------|---------------|
+| NVIDIA RTX 40xx / 50xx | `pip install -r requirements.txt` | `python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct` |
+| NVIDIA GTX 10xx / RTX 20xx | `pip install torch --index-url https://download.pytorch.org/whl/cu118` + other deps | add `--device cuda` |
+| Apple M1–M4 | `pip install torch torchvision` + other deps | `--device mps` (or auto) |
+| AMD RX 7000/9000 Linux | ROCm wheel from AMD docs + other deps | `--device cuda` (ROCm) |
+| AMD / Intel Windows | `pip install torch-directml` + other deps | `--device dml` |
+| Intel Arc / Core Ultra | `pip install torch --index-url https://download.pytorch.org/whl/xpu` + other deps | `--device xpu` |
+| Any CPU-only | `pip install torch --index-url https://download.pytorch.org/whl/cpu` + other deps | `--device cpu` |
+
+“Other deps” = `pip install transformers accelerate huggingface_hub certifi sentencepiece protobuf safetensors`
+
+---
+
+### Verify your setup (all platforms)
+
+```bash
+# 1) Backends exposed to inference.py
+python inference.py --list-devices
+
+# 2) Low-level PyTorch device check (examples)
+python -c "import torch; print('torch', torch.__version__)"
+python -c "import torch; print('cuda', torch.cuda.is_available())"          # NVIDIA / AMD ROCm
+python -c "import torch; print('mps', torch.backends.mps.is_available())"  # Apple
+python -c "import torch; print('xpu', hasattr(torch,'xpu') and torch.xpu.is_available())"  # Intel
+
+# 3) End-to-end smoke test
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --no-interactive --prompt "Say hello in one sentence."
+```
 
 ---
 
@@ -517,9 +1043,50 @@ Only use this with models you trust.
 - Use an **Instruct** / **Chat** model, not a base model.
 - Add a clear `--system-prompt`.
 
-### Apple Silicon: MPS errors on older PyTorch
+### `conda: command not found`
 
-Upgrade PyTorch to the latest stable version for your macOS version.
+- Open a **new** terminal after installing Miniconda.
+- On Windows, use **Anaconda Prompt** / **Miniconda Prompt**, or re-run the installer and enable “Add to PATH”.
+- On macOS/Linux, run `conda init bash` (or `zsh`), restart the shell, then retry.
+
+### Wrong PyTorch wheel installed (GPU shows as CPU)
+
+Symptoms: `--list-devices` only shows `cpu` but you have a GPU.
+
+1. Check what you installed: `python -c "import torch; print(torch.__version__)"`
+2. Uninstall and reinstall the correct wheel per the [Platform setup guide](#platform-setup-guide-nvidia-amd-intel-apple-cpu).
+3. Common mistake: CPU-only `torch` from PyPI when `cu128` was intended — use `--index-url` from pytorch.org or this repo’s `requirements.txt`.
+
+### NVIDIA `sm_120` / Blackwell (RTX 50xx) not supported
+
+You need **PyTorch 2.7+** with **cu128**. Older `cu124` builds do not include Blackwell kernels:
+
+```bash
+pip uninstall -y torch
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+```
+
+Update your NVIDIA driver to the latest version for RTX 50-series.
+
+### AMD ROCm `hipErrorNoBinaryForGPU` (Linux)
+
+Your ROCm PyTorch build does not match the GPU architecture. Check AMD’s compatibility matrix and install the ROCm version documented for your card (e.g. RDNA 3 vs RDNA 4). Ensure your user is in the `render` and `video` groups on Linux.
+
+### Intel XPU not listed
+
+1. Install Intel GPU drivers first ([Intel prerequisites](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html)).
+2. Reinstall: `pip install torch --index-url https://download.pytorch.org/whl/xpu`
+3. On Windows, try DirectML as fallback: `pip install torch-directml` and `--device dml`.
+
+### Apple MPS fallback
+
+Upgrade PyTorch to the latest stable version for your macOS version. If errors persist:
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --device cpu
+```
+
+Or try `--dtype float32` with MPS (see [Apple Silicon](#apple-silicon-mps-backend)).
 
 ### Windows AMD GPU not detected
 
@@ -551,6 +1118,18 @@ Rough measure of model size. 0.5B ≈ 500 million learned weights. Bigger often 
 
 **Why is the first run slow?**  
 Downloading and loading multi-gigabyte weights takes time. Later runs reuse the cache.
+
+**Can I use Miniconda instead of venv?**  
+Yes — [Option B in Step 3](#option-b--miniconda-recommended-for-gpu-workflows) is recommended for GPU setups. Models still download to `models/` in the project folder regardless of environment type.
+
+**Which NVIDIA CUDA wheel should I pick?**  
+For RTX 40xx / 50xx: **cu128** (this repo default). For GTX 10xx / RTX 20xx on older drivers: try **cu118**. PyTorch wheels bundle CUDA — you only need a recent NVIDIA driver.
+
+**Does AMD use CUDA in this script?**  
+On Linux with ROCm, PyTorch exposes AMD GPUs through the `torch.cuda` API, so `inference.py` reports backend `cuda` — that is normal.
+
+**Can I run on Intel integrated graphics?**  
+Recent **Core Ultra** with Arc iGPU: try `--device xpu`. Older Iris Xe on Windows: try `--device dml`. Otherwise use CPU.
 
 **Can I run multiple GPUs?**  
 With several NVIDIA/AMD CUDA devices, `--device auto` uses `accelerate` to spread layers across GPUs.
