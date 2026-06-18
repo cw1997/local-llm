@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Optional
+from typing import Any
 
 
 def _ensure_ssl_certs() -> None:
@@ -50,8 +50,8 @@ class DeviceInfo:
     torch_device: str
     label: str
     backend: str
-    device_map: Optional[str] = None
-    torch_dtype: Optional[str] = None
+    device_map: str | None = None
+    torch_dtype: str | None = None
 
 
 def _try_import_torch():
@@ -199,28 +199,46 @@ def resolve_device(requested: str, dtype: str) -> DeviceInfo:
 
     if req in {"cuda", "gpu"}:
         if _cuda_device_count(torch) == 0:
-            print("Warning: CUDA was requested but is not available. Falling back to CPU.", file=sys.stderr)
+            print(
+                "Warning: CUDA was requested but is not available. Falling back to CPU.",
+                file=sys.stderr,
+            )
             return DeviceInfo("cpu", "CPU (CUDA unavailable)", "cpu", None, resolved_dtype)
         count = _cuda_device_count(torch)
         if count == 1:
             return DeviceInfo("cuda:0", _cuda_device_labels(torch)[0], "cuda", None, resolved_dtype)
-        return DeviceInfo("cuda", ", ".join(_cuda_device_labels(torch)), "cuda", "auto", resolved_dtype)
+        return DeviceInfo(
+            "cuda",
+            ", ".join(_cuda_device_labels(torch)),
+            "cuda",
+            "auto",
+            resolved_dtype,
+        )
 
     if req == "mps":
         if not _mps_available(torch):
-            print("Warning: MPS was requested but is not available. Falling back to CPU.", file=sys.stderr)
+            print(
+                "Warning: MPS was requested but is not available. Falling back to CPU.",
+                file=sys.stderr,
+            )
             return DeviceInfo("cpu", "CPU (MPS unavailable)", "cpu", None, resolved_dtype)
         return DeviceInfo("mps", "Apple Metal (MPS)", "mps", None, resolved_dtype)
 
     if req == "xpu":
         if not _xpu_available(torch):
-            print("Warning: Intel XPU was requested but is not available. Falling back to CPU.", file=sys.stderr)
+            print(
+                "Warning: Intel XPU was requested but is not available. Falling back to CPU.",
+                file=sys.stderr,
+            )
             return DeviceInfo("cpu", "CPU (XPU unavailable)", "cpu", None, resolved_dtype)
         return DeviceInfo("xpu", "Intel XPU", "xpu", None, resolved_dtype)
 
     if req in {"dml", "directml"}:
         if not _directml_available():
-            print("Warning: DirectML was requested but is not available. Falling back to CPU.", file=sys.stderr)
+            print(
+                "Warning: DirectML was requested but is not available. Falling back to CPU.",
+                file=sys.stderr,
+            )
             return DeviceInfo("cpu", "CPU (DirectML unavailable)", "cpu", None, resolved_dtype)
         return DeviceInfo(
             "privateuseone",
@@ -279,7 +297,7 @@ def download_model(
     model_id: str,
     models_dir: Path,
     revision: str,
-    token: Optional[str],
+    token: str | None,
     force_download: bool,
 ) -> Path:
     """Download model snapshot into models_dir if not already present."""
@@ -308,7 +326,7 @@ def load_model_and_tokenizer(
     model_path: Path,
     device_info: DeviceInfo,
     trust_remote_code: bool,
-    token: Optional[str],
+    token: str | None,
     low_cpu_mem_usage: bool,
 ):
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -397,7 +415,7 @@ def build_prompt_from_messages(tokenizer, messages: list[dict[str, str]]) -> str
     return _messages_to_plain_text(messages)
 
 
-def build_prompt(tokenizer, user_prompt: str, system_prompt: Optional[str]) -> str:
+def build_prompt(tokenizer, user_prompt: str, system_prompt: str | None) -> str:
     """Build a single-turn chat or plain prompt."""
     messages: list[dict[str, str]] = []
     if system_prompt:
@@ -414,7 +432,7 @@ def run_interactive_session(
     model,
     tokenizer,
     *,
-    system_prompt: Optional[str],
+    system_prompt: str | None,
     device_info: DeviceInfo,
     model_id: str,
     max_new_tokens: int,
@@ -423,7 +441,7 @@ def run_interactive_session(
     top_k: int,
     repetition_penalty: float,
     do_sample: bool,
-    seed: Optional[int],
+    seed: int | None,
 ) -> int:
     """Run a multi-turn interactive chat loop with conversation history."""
     history: list[dict[str, str]] = []
@@ -506,14 +524,13 @@ def stream_generate(
     top_k: int,
     repetition_penalty: float,
     do_sample: bool,
-    seed: Optional[int],
+    seed: int | None,
 ) -> tuple[str, int, float]:
     """
     Generate text with streaming stdout output.
 
     Returns (full_text, completion_token_count, generation_seconds).
     """
-    import torch
     from transformers import TextIteratorStreamer
 
     torch = _try_import_torch()
@@ -531,8 +548,6 @@ def stream_generate(
     input_ids = input_ids.to(device)
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
-
-    prompt_token_count = int(input_ids.shape[-1])
 
     streamer = TextIteratorStreamer(
         tokenizer,
@@ -613,10 +628,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct\n"
+            "  python inference.py --model-id Qwen/Qwen3.5-0.8B\n"
             "  python inference.py --model-id microsoft/Phi-3-mini-4k-instruct "
             '--no-interactive --prompt "Explain gravity in one sentence."\n'
-            "  python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct "
+            "  python inference.py --model-id Qwen/Qwen3.5-0.8B "
             "--max-new-tokens 512 --temperature 0.2 --device auto\n"
             "  python inference.py --model-id meta-llama/Llama-3.2-1B-Instruct "
             '--system-prompt "You are a helpful assistant." --device cuda\n'
@@ -626,7 +641,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-id",
         default=None,
-        help="Hugging Face model repository id (required unless --list-devices), e.g. Qwen/Qwen2.5-0.5B-Instruct",
+        help=(
+            "Hugging Face model repository id (required unless --list-devices), "
+            "e.g. Qwen/Qwen3.5-0.8B"
+        ),
     )
     parser.add_argument(
         "--interactive",
@@ -740,7 +758,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
