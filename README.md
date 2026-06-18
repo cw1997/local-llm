@@ -29,6 +29,9 @@ You do **not** need prior experience with AI or Python to follow this guide. Eve
 - [Understanding the output](#understanding-the-output)
 - [All command-line options](#all-command-line-options)
 - [Choosing a model](#choosing-a-model)
+  - [Model families on Hugging Face](#model-families-on-hugging-face)
+  - [Pick by hardware (VRAM / RAM)](#pick-by-hardware-vram--ram)
+  - [Gated models and licenses](#gated-models-and-licenses)
 - [Platform setup guide (NVIDIA, AMD, Intel, Apple, CPU)](#platform-setup-guide-nvidia-amd-intel-apple-cpu)
   - [Identify your GPU (model, architecture, generation)](#identify-your-gpu-model-architecture-generation)
 - [Gated / private models](#gated--private-models)
@@ -553,24 +556,235 @@ python inference.py --help
 
 ## Choosing a model
 
-Browse models at [https://huggingface.co/models](https://huggingface.co/models).
+Browse and filter models at [https://huggingface.co/models](https://huggingface.co/models). For chat with `inference.py`, use **text-generation** models that are **decoder-only causal LMs** with an **Instruct** or **Chat** fine-tune.
+
+### Quick rules
+
+| Rule | Why |
+|------|-----|
+| Prefer **`-Instruct`** or **`-Chat`** suffix | Tuned for Q&A and dialogue; base models often ignore instructions |
+| Match model size to your **VRAM / RAM** | See [Pick by hardware](#pick-by-hardware-vram--ram) |
+| Check the **model card** on Hugging Face | License, languages, context length, hardware notes |
+| Start small, then scale up | `Qwen/Qwen2.5-0.5B-Instruct` is the fastest sanity check |
+| Use `--trust-remote-code` only when the card says so | Some architectures need custom code from the Hub |
+
+Chat-tuned models use each tokenizer’s **chat template** when available; otherwise `inference.py` falls back to a simple plain-text format.
 
 ### Good starter models (small, chat-ready)
 
-| Model ID | Approx. size | Notes |
-|----------|--------------|-------|
-| `Qwen/Qwen2.5-0.5B-Instruct` | ~1 GB | Very fast, low RAM |
-| `microsoft/Phi-3-mini-4k-instruct` | ~7 GB | Strong quality for its size |
-| `meta-llama/Llama-3.2-1B-Instruct` | ~2 GB | Gated — requires HF account + token |
+Best first downloads — fast, low disk/RAM, work on most hardware:
 
-Prefer model cards whose names end in **`-Instruct`** or **`-Chat`** for question-answering. Base models (no suffix) are usually not tuned for dialogue. Chat-tuned models use each tokenizer’s **chat template** when available; otherwise the script falls back to a simple plain-text format.
+| Model ID | Params | Approx. disk | VRAM (fp16) | License | Notes |
+|----------|--------|--------------|-------------|---------|-------|
+| [Qwen/Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) | 0.5B | ~1 GB | 2 GB | Apache 2.0 | Default demo model; very fast |
+| [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) | 1.5B | ~3 GB | 4 GB | Apache 2.0 | Better quality than 0.5B |
+| [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) | 1B | ~2 GB | 3 GB | Llama 3.2 | **Gated** — HF token required |
+| [meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct) | 3B | ~6 GB | 6 GB | Llama 3.2 | **Gated**; strong small Llama |
+| [google/gemma-2-2b-it](https://huggingface.co/google/gemma-2-2b-it) | 2B | ~5 GB | 5 GB | Gemma | **Gated**; `-it` = instruction-tuned |
+| [HuggingFaceTB/SmolLM2-1.7B-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct) | 1.7B | ~3 GB | 4 GB | Apache 2.0 | HF’s compact instruct model |
+| [microsoft/Phi-3-mini-4k-instruct](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct) | 3.8B | ~7 GB | 8 GB | MIT | Strong reasoning for its size |
+| [microsoft/Phi-3.5-mini-instruct](https://huggingface.co/microsoft/Phi-3.5-mini-instruct) | 3.8B | ~7 GB | 8 GB | MIT | Updated Phi mini series |
 
-### Size vs. quality
+```bash
+# Try any starter model (replace model-id as needed)
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct
+python inference.py --model-id HuggingFaceTB/SmolLM2-1.7B-Instruct --no-interactive --prompt "Explain recursion briefly."
+```
 
-- **Smaller models** (0.5B–3B parameters): faster, less RAM, simpler answers.
-- **Larger models** (7B+): better reasoning, but need more VRAM/RAM and time.
+### Model families on Hugging Face
 
-If generation is slow or you run out of memory, pick a smaller model or use `--device cpu` with a tiny model.
+Below are the **most popular open LLM families** for local inference with Transformers. Sizes marked **Gated** need a Hugging Face account, license acceptance, and `HF_TOKEN` (see [Gated models](#gated--private-models)).
+
+#### Qwen (Alibaba)
+
+Widely used for multilingual chat (strong **Chinese + English**), coding, and math. **Apache 2.0** on most Qwen2.5 weights.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `Qwen/Qwen2.5-0.5B-Instruct` | 0.5B | Ultra-light | Fastest smoke test |
+| `Qwen/Qwen2.5-1.5B-Instruct` | 1.5B | Light | Sweet spot on 8 GB machines |
+| `Qwen/Qwen2.5-3B-Instruct` | 3B | Light | Noticeably smarter than 1.5B |
+| `Qwen/Qwen2.5-7B-Instruct` | 7B | Mainstream | Default “real” local LLM for 16 GB VRAM |
+| `Qwen/Qwen2.5-14B-Instruct` | 14B | Large | Needs 24 GB+ VRAM |
+| `Qwen/Qwen2.5-32B-Instruct` | 32B | Large | 48 GB+ VRAM or multi-GPU |
+| `Qwen/Qwen2.5-72B-Instruct` | 72B | XL | Datacenter / multi-GPU only |
+| `Qwen/Qwen3-1.7B` | 1.7B | Light | Qwen3 generation; conversational |
+| `Qwen/Qwen3-4B-Instruct-2507` | 4B | Light | Explicit Qwen3 instruct build |
+| `Qwen/Qwen3-8B` | 8B | Mainstream | Qwen3 flagship small; tagged conversational |
+| `Qwen/Qwen3-32B` | 32B | Large | High-end Qwen3; 48 GB+ VRAM |
+| `Qwen/Qwen2.5-Coder-7B-Instruct` | 7B | Code | Code generation / completion focus |
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-7B-Instruct --system-prompt "You are a helpful coding assistant."
+```
+
+#### Llama (Meta)
+
+Industry-standard open weights. **Llama 3.x** uses the **Llama Community License** — gated on Hugging Face.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `meta-llama/Llama-3.2-1B-Instruct` | 1B | Ultra-light | Smallest gated Llama |
+| `meta-llama/Llama-3.2-3B-Instruct` | 3B | Light | Good mobile / laptop model |
+| `meta-llama/Llama-3.1-8B-Instruct` | 8B | Mainstream | Most popular mid-size Llama |
+| `meta-llama/Llama-3.1-70B-Instruct` | 70B | XL | Multi-GPU; excellent but heavy |
+| `meta-llama/Llama-3.3-70B-Instruct` | 70B | XL | Updated 70B; top open Llama tier |
+
+```bash
+export HF_TOKEN=hf_your_token_here
+python inference.py --model-id meta-llama/Llama-3.1-8B-Instruct --token $HF_TOKEN
+```
+
+#### Gemma (Google)
+
+Compact, efficient models. Instruction-tuned variants use **`-it`** suffix. Most are **gated**.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `google/gemma-2-2b-it` | 2B | Light | Efficient 2B instruct |
+| `google/gemma-2-9b-it` | 9B | Mainstream | Strong 9B general model |
+| `google/gemma-2-27b-it` | 27B | Large | High quality; needs 48 GB+ VRAM |
+| `google/gemma-3-1b-it` | 1B | Ultra-light | Gemma 3 generation |
+| `google/gemma-3-4b-it` | 4B | Light | Multimodal variants exist — use **text-only** cards for this script |
+| `google/gemma-3-12b-it` | 12B | Large | Gemma 3 mid-large |
+
+#### Mistral & Ministral (Mistral AI)
+
+European lab; strong **English** and **code**. Apache 2.0 on many releases.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `mistralai/Mistral-7B-Instruct-v0.3` | 7B | Mainstream | Classic efficient 7B |
+| `mistralai/Ministral-8B-Instruct-2410` | 8B | Mainstream | Newer compact Mistral |
+| `mistralai/Mistral-Small-Instruct-2409` | 22B | Large | “Small” in name, large in size |
+| `mistralai/Mixtral-8x7B-Instruct-v0.1` | 47B MoE | Large | Mixture-of-experts; needs more VRAM |
+| `mistralai/Devstral-Small-2505` | 24B | Large | Code-focused instruct model |
+
+MoE models (Mixtral) load more weights than active parameters but still need substantial VRAM.
+
+#### Microsoft Phi
+
+Small models with strong **reasoning per parameter**; good on laptops.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `microsoft/Phi-3-mini-4k-instruct` | 3.8B | Light | 4k context; very popular |
+| `microsoft/Phi-3.5-mini-instruct` | 3.8B | Light | Improved mini |
+| `microsoft/Phi-3-medium-4k-instruct` | 14B | Large | Heavier Phi tier |
+| `microsoft/Phi-4-mini-instruct` | 3.8B | Light | Phi-4 generation |
+| `microsoft/phi-4` | 14B | Large | Full Phi-4 (check card for chat usage) |
+
+#### DeepSeek
+
+Known for **reasoning** and **coding**. Distilled R1 models are popular for local use.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 1.5B | Light | Smallest R1 distill |
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | 7B | Mainstream | R1-style reasoning distill |
+| `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` | 8B | Mainstream | Llama-based R1 distill |
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` | 14B | Large | Mid-large distill |
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B` | 32B | Large | High-end distill |
+| `deepseek-ai/DeepSeek-R1-Distill-Llama-70B` | 70B | XL | Needs multi-GPU |
+| `deepseek-ai/DeepSeek-V2.5` | 236B MoE | XL | Too large for most local setups |
+| `deepseek-ai/DeepSeek-V3` | 671B MoE | XL | API / cluster scale only |
+
+For `inference.py`, start with **Distill** checkpoints (7B / 8B), not full V2/V3 MoE.
+
+#### Yi (01.AI)
+
+Bilingual **Chinese + English** models.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `01-ai/Yi-1.5-6B-Chat` | 6B | Light | Efficient chat model |
+| `01-ai/Yi-1.5-9B-Chat` | 9B | Mainstream | Strong mid-size |
+| `01-ai/Yi-1.5-34B-Chat` | 34B | Large | High quality; 48 GB+ VRAM |
+
+#### SmolLM (Hugging Face)
+
+Tiny models for education, edge devices, and fast experiments.
+
+| Model ID | Params | Tier | Highlights |
+|----------|--------|------|------------|
+| `HuggingFaceTB/SmolLM2-135M-Instruct` | 135M | Tiny | Runs almost anywhere |
+| `HuggingFaceTB/SmolLM2-360M-Instruct` | 360M | Tiny | Still sub-1B |
+| `HuggingFaceTB/SmolLM2-1.7B-Instruct` | 1.7B | Light | Best SmolLM2 quality |
+
+#### Other notable families
+
+| Family | Example model ID | Notes |
+|--------|------------------|-------|
+| **TinyLlama** | `TinyLlama/TinyLlama-1.1B-Chat-v1.0` | Community 1.1B chat baseline |
+| **Zephyr** (H4 fine-tune) | `HuggingFaceH4/zephyr-7b-beta` | Popular Mistral-7B chat fine-tune |
+| **OpenChat** | `openchat/openchat-3.5-0106` | Strong conversational fine-tune |
+| **Code-focused** | `Qwen/Qwen2.5-Coder-7B-Instruct`, `codellama/CodeLlama-7b-Instruct-hf` | Programming tasks; weaker at open chat |
+| **Falcon** | `tiiuae/falcon-7b-instruct` | Older but still referenced |
+| **OLMo** | `allenai/OLMo-7B-Instruct-hf` | Open research LM from Allen AI |
+
+### Pick by hardware (VRAM / RAM)
+
+Rough **fp16** guidance for `inference.py` (no quantization). For CPU, treat “VRAM” as **system RAM**.
+
+| Your hardware | Suggested param range | Example models |
+|---------------|----------------------|----------------|
+| 4–6 GB VRAM / 8 GB RAM | ≤1.5B | `Qwen2.5-0.5B`, `SmolLM2-1.7B`, `Llama-3.2-1B` |
+| 8 GB VRAM / 16 GB RAM | ≤3B | `Qwen2.5-3B`, `Llama-3.2-3B`, `Phi-3-mini` |
+| 12 GB VRAM | ≤7–8B | `Qwen2.5-7B`, `Llama-3.1-8B`, `Mistral-7B` |
+| 16 GB VRAM | ≤9–14B | `Qwen2.5-14B`, `gemma-2-9b-it`, `Phi-3-medium` |
+| 24 GB VRAM | ≤14–22B | `Qwen2.5-14B`, `Mistral-Small`, `Yi-34B` (tight) |
+| 48 GB+ / multi-GPU | 32B–70B | `Qwen2.5-32B`, `Llama-3.1-70B`, `DeepSeek-R1-Distill-32B` |
+
+If a model does not fit:
+
+1. Pick a smaller checkpoint from the same family (e.g. 7B → 3B).
+2. Lower `--max-new-tokens` and use `/clear` often in chat.
+3. Force `--device cpu` with a ≤1.5B model as last resort.
+
+> **Note:** This script loads full-precision (fp16/bf16/fp32) weights via Transformers. For **GGUF / quantized** models (Q4_K_M, etc.), use tools like [llama.cpp](https://github.com/ggml-org/llama.cpp) instead — they are not loaded by `inference.py` as-is.
+
+### Gated models and licenses
+
+| License type | Examples | What you need |
+|--------------|----------|---------------|
+| **Apache 2.0 / MIT** | Qwen2.5, Mistral, SmolLM, Phi | Usually download without login |
+| **Llama Community License** | Llama 3.x | HF account + accept license + token |
+| **Gemma license** | Gemma 2 / 3 | HF account + accept license + token |
+| **Custom / research** | Some fine-tunes | Read model card carefully |
+
+Always read the **model card** on Hugging Face before commercial use. Weights are **not** covered by this repo’s LICENSE.
+
+### Browse Hugging Face like a pro
+
+On [huggingface.co/models](https://huggingface.co/models), useful filters:
+
+- **Task:** `Text Generation`
+- **Library:** `Transformers`
+- **Sort:** `Trending` or `Most downloads`
+- **Search examples:** `qwen2.5 instruct`, `llama 3.1 8b`, `mistral instruct`
+
+Official task-specific leaderboards (coding, math, chat) live on the Hub — search “benchmark” datasets or visit model cards’ **Evaluation** sections. For automated leaderboard lookup, Hugging Face’s API and `hf` CLI can query benchmark datasets (see [Hugging Face docs](https://huggingface.co/docs)).
+
+### Models that may need extra flags
+
+| Situation | What to do |
+|-----------|------------|
+| Model card says “custom architecture” | Add `--trust-remote-code` |
+| Gated model | Set `HF_TOKEN` or `--token` |
+| Very slow first reply | Normal — weights are loading; later turns are faster |
+| Multimodal-only (vision/audio) | Pick a **text-only** `-Instruct` variant; avoid `*-VL-*` vision models in this script |
+
+```bash
+python inference.py --model-id <org/model> --trust-remote-code --no-interactive --prompt "Hello"
+```
+
+### Size vs. quality (summary)
+
+- **Smaller models** (0.5B–3B): fastest, lowest RAM, simpler answers, more hallucination on hard tasks.
+- **Mid models** (7B–9B): best balance for most desktop GPUs.
+- **Large models** (14B–70B): best reasoning and instruction-following; need high VRAM or multi-GPU.
+
+If generation is slow or you run out of memory, pick a smaller model from the tables above or see [Identify your GPU](#identify-your-gpu-model-architecture-generation) and [VRAM / RAM vs model size](#vram--ram-vs-model-size-rule-of-thumb).
 
 ---
 
