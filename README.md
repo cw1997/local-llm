@@ -7,7 +7,8 @@ This repository contains a single Python script, [`inference.py`](inference.py),
 1. Downloads a model from [Hugging Face Hub](https://huggingface.co/models) into a local `models/` folder.
 2. Loads the model on your hardware (NVIDIA, AMD, Intel, Apple Silicon, or CPU).
 3. Streams generated text to your terminal in real time.
-4. Prints a summary with elapsed time, token counts, and generation speed.
+4. Runs an **interactive chat** by default (multi-turn conversation with history).
+5. Prints a summary with elapsed time, token counts, and generation speed.
 
 You do **not** need prior experience with AI or Python to follow this guide. Every step is explained below.
 
@@ -215,18 +216,35 @@ Detected inference backends on this machine:
 Try a **small** instruct model (fast download, works on modest hardware):
 
 ```bash
-python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --prompt "What is the capital of France?"
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct
 ```
 
 On macOS/Linux, if `python` is not found, use `python3` instead.
+
+After the model loads, you enter **interactive chat** mode. Type a question at the `You>` prompt and press Enter. The model streams its reply, then waits for your next message.
+
+**Interactive commands**
+
+| Command | Action |
+|---------|--------|
+| `/exit` or `/quit` | End the session |
+| `/clear` | Reset conversation history (useful if replies get slow or off-topic) |
 
 ### What happens
 
 1. The script prints which **device** it will use (GPU or CPU).
 2. It downloads model files into `./models/` (skipped on later runs if already cached).
 3. It loads weights into memory (can take 10 seconds to several minutes).
-4. It **streams** the answer token by token.
-5. It prints **statistics**: time, token counts, tokens per second.
+4. It starts an interactive chat loop — each turn **streams** the answer token by token.
+5. After each reply it prints **statistics**: time, token counts, tokens per second.
+
+### Single-shot mode (one prompt, then exit)
+
+To run a single question without entering chat, pass `--no-interactive`:
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --no-interactive --prompt "What is the capital of France?"
+```
 
 ### Another example with a system prompt
 
@@ -234,6 +252,7 @@ On macOS/Linux, if `python` is not found, use `python3` instead.
 python inference.py ^
   --model-id Qwen/Qwen2.5-0.5B-Instruct ^
   --system-prompt "You are a concise science tutor." ^
+  --no-interactive ^
   --prompt "Explain photosynthesis in three sentences." ^
   --max-new-tokens 200 ^
   --temperature 0.3
@@ -245,9 +264,16 @@ On macOS/Linux, replace `^` line continuations with `\`:
 python inference.py \
   --model-id Qwen/Qwen2.5-0.5B-Instruct \
   --system-prompt "You are a concise science tutor." \
+  --no-interactive \
   --prompt "Explain photosynthesis in three sentences." \
   --max-new-tokens 200 \
   --temperature 0.3
+```
+
+For interactive chat with a system prompt, omit `--no-interactive` and `--prompt`:
+
+```bash
+python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct --system-prompt "You are a concise science tutor."
 ```
 
 ---
@@ -312,7 +338,8 @@ Only **`--model-id`** is required. Everything else has a sensible default.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--model-id` | *(required)* | Hugging Face repo id, e.g. `Qwen/Qwen2.5-0.5B-Instruct` |
-| `--prompt` | Short hello message | Your question or instruction |
+| `--interactive` / `--no-interactive` | Interactive on | Multi-turn chat (default) or single-shot with `--prompt` |
+| `--prompt` | Short hello message | Question for single-shot mode (only with `--no-interactive`) |
 | `--system-prompt` | None | Optional system role text for chat-tuned models |
 | `--models-dir` | `models` | Local folder for downloaded weights |
 | `--revision` | `main` | Git branch / tag / commit on the Hub |
@@ -421,7 +448,7 @@ export HF_TOKEN=hf_your_token_here
 **Option B — command-line flag**
 
 ```bash
-python inference.py --model-id meta-llama/Llama-3.2-1B-Instruct --token hf_your_token_here --prompt "Hello"
+python inference.py --model-id meta-llama/Llama-3.2-1B-Instruct --token hf_your_token_here --no-interactive --prompt "Hello"
 ```
 
 Never commit tokens to Git or share them publicly.
@@ -459,7 +486,7 @@ Use `python3` instead of `python`, or reinstall Python and enable **Add to PATH*
 Some models need custom Python code from the Hub:
 
 ```bash
-python inference.py --model-id <model> --trust-remote-code --prompt "Hi"
+python inference.py --model-id <model> --trust-remote-code --no-interactive --prompt "Hi"
 ```
 
 Only use this with models you trust.
@@ -481,7 +508,7 @@ Install DirectML support:
 
 ```bash
 pip install torch-directml
-python inference.py --device dml --model-id Qwen/Qwen2.5-0.5B-Instruct --prompt "Test"
+python inference.py --device dml --model-id Qwen/Qwen2.5-0.5B-Instruct --no-interactive --prompt "Test"
 ```
 
 ---
@@ -515,7 +542,7 @@ With several NVIDIA/AMD CUDA devices, `--device auto` uses `accelerate` to sprea
 
 ```text
 local-llm/
-├── inference.py       # Main script — download + infer + stream
+├── inference.py       # Main script — download + interactive chat + stream
 ├── requirements.txt   # Python package dependencies
 ├── README.md          # This file
 ├── LICENSE

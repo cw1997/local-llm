@@ -365,24 +365,135 @@ def load_model_and_tokenizer(
 # ---------------------------------------------------------------------------
 
 
+def _messages_to_plain_text(messages: list[dict[str, str]]) -> str:
+    """Fallback when no chat template is available."""
+    parts: list[str] = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            parts.append(f"System: {content}")
+        elif role == "user":
+            parts.append(f"User: {content}")
+        elif role == "assistant":
+            parts.append(f"Assistant: {content}")
+    parts.append("Assistant:")
+    return "\n".join(parts)
+
+
+def build_prompt_from_messages(tokenizer, messages: list[dict[str, str]]) -> str:
+    """Build a chat or plain prompt from a multi-turn message list."""
+    if hasattr(tokenizer, "apply_chat_template"):
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            pass
+    if len(messages) == 1 and messages[0]["role"] == "user":
+        return messages[0]["content"]
+    return _messages_to_plain_text(messages)
+
+
 def build_prompt(tokenizer, user_prompt: str, system_prompt: Optional[str]) -> str:
-    """Build a chat or plain prompt depending on tokenizer capabilities."""
+    """Build a single-turn chat or plain prompt."""
+    messages: list[dict[str, str]] = []
     if system_prompt:
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-        if hasattr(tokenizer, "apply_chat_template"):
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_prompt})
+    return build_prompt_from_messages(tokenizer, messages)
+
+
+_EXIT_COMMANDS = frozenset({"/exit", "/quit", "exit", "quit"})
+_CLEAR_COMMANDS = frozenset({"/clear", "clear"})
+
+
+def run_interactive_session(
+    model,
+    tokenizer,
+    *,
+    system_prompt: Optional[str],
+    device_info: DeviceInfo,
+    model_id: str,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    repetition_penalty: float,
+    do_sample: bool,
+    seed: Optional[int],
+) -> int:
+    """Run a multi-turn interactive chat loop with conversation history."""
+    history: list[dict[str, str]] = []
+
+    print("Interactive chat started. Type your message and press Enter.")
+    print("Commands: /exit or /quit to leave, /clear to reset conversation history.")
+    print()
+
+    try:
+        while True:
             try:
-                return tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-            except Exception:
-                pass
-        return f"System: {system_prompt}\nUser: {user_prompt}\nAssistant:"
-    return user_prompt
+                user_input = input("You> ").strip()
+            except EOFError:
+                print("\nEnd of input. Goodbye.")
+                break
+
+            if not user_input:
+                continue
+
+            normalized = user_input.lower()
+            if normalized in _EXIT_COMMANDS:
+                print("Goodbye.")
+                break
+
+            if normalized in _CLEAR_COMMANDS:
+                history.clear()
+                print("Conversation history cleared.")
+                continue
+
+            history.append({"role": "user", "content": user_input})
+
+            messages: list[dict[str, str]] = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.extend(history)
+
+            prompt = build_prompt_from_messages(tokenizer, messages)
+            prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=False))
+
+            print(f"Prompt token count: {prompt_tokens}")
+            print("Starting generation...\n")
+
+            completion, completion_tokens, elapsed = stream_generate(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+                do_sample=do_sample,
+                seed=seed,
+            )
+
+            history.append({"role": "assistant", "content": completion})
+
+            print_stats(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                elapsed_seconds=elapsed,
+                device_info=device_info,
+                model_id=model_id,
+            )
+            print()
+
+    except KeyboardInterrupt:
+        print("\nInterrupted. Goodbye.")
+
+    return 0
 
 
 def stream_generate(
@@ -502,12 +613,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog=(
             "Examples:\n"
+            "  python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct\n"
             "  python inference.py --model-id microsoft/Phi-3-mini-4k-instruct "
-            '--prompt "Explain gravity in one sentence."\n'
+            '--no-interactive --prompt "Explain gravity in one sentence."\n'
             "  python inference.py --model-id Qwen/Qwen2.5-0.5B-Instruct "
             "--max-new-tokens 512 --temperature 0.2 --device auto\n"
             "  python inference.py --model-id meta-llama/Llama-3.2-1B-Instruct "
-            "--system-prompt \"You are a helpful assistant.\" --device cuda\n"
+            '--system-prompt "You are a helpful assistant." --device cuda\n'
         ),
     )
 
@@ -517,9 +629,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Hugging Face model repository id (required unless --list-devices), e.g. Qwen/Qwen2.5-0.5B-Instruct",
     )
     parser.add_argument(
+        "--interactive",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run multi-turn interactive chat (default). Use --no-interactive for single-shot",
+    )
+    parser.add_argument(
         "--prompt",
         default="Hello! Please introduce yourself in two short sentences.",
-        help="User prompt / question sent to the model",
+        help="User prompt for single-shot mode (only used with --no-interactive)",
     )
     parser.add_argument(
         "--system-prompt",
@@ -666,6 +784,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         token=token,
         low_cpu_mem_usage=args.low_cpu_mem_usage,
     )
+
+    if args.interactive:
+        return run_interactive_session(
+            model,
+            tokenizer,
+            system_prompt=args.system_prompt,
+            device_info=device_info,
+            model_id=args.model_id,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+            repetition_penalty=args.repetition_penalty,
+            do_sample=args.do_sample,
+            seed=args.seed,
+        )
 
     prompt = build_prompt(tokenizer, args.prompt, args.system_prompt)
     prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=False))
